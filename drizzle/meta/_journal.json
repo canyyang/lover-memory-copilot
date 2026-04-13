@@ -8,6 +8,20 @@
       "when": 1776006358176,
       "tag": "0000_yielding_ezekiel_stane",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776010989042,
+      "tag": "0001_aberrant_proemial_gods",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776095306216,
+      "tag": "0002_big_speed_demon",
+      "breakpoints": true
     }
   ]
 }
