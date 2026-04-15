@@ -11,6 +11,46 @@ function formatDateTime(value: Date | string) {
   });
 }
 
+function getMoodBadgeClass(moodLabel: string | null) {
+  switch (moodLabel) {
+    case '轻松':
+      return 'bg-green-50 text-green-700 border-green-200';
+    case '暧昧':
+      return 'bg-pink-50 text-pink-700 border-pink-200';
+    case '不安':
+      return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+    case '安抚':
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    case '试探':
+      return 'bg-orange-50 text-orange-700 border-orange-200';
+    case '认真':
+      return 'bg-purple-50 text-purple-700 border-purple-200';
+    case '低落':
+      return 'bg-slate-100 text-slate-700 border-slate-300';
+    case '日常':
+    default:
+      return 'bg-gray-50 text-gray-700 border-gray-200';
+  }
+}
+
+function getSignalBadgeClass(signalLabel: string | null) {
+  switch (signalLabel) {
+    case '关系升温':
+      return 'bg-rose-50 text-rose-700 border-rose-200';
+    case '互相关心':
+      return 'bg-sky-50 text-sky-700 border-sky-200';
+    case '情绪波动':
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    case '试探承诺':
+      return 'bg-violet-50 text-violet-700 border-violet-200';
+    case '需要关注':
+      return 'bg-red-50 text-red-700 border-red-200';
+    case '普通互动':
+    default:
+      return 'bg-gray-50 text-gray-700 border-gray-200';
+  }
+}
+
 export default async function ReviewPage() {
   // 1. 找最近一次已解析完成的导入记录
   const latestImportRows = await db
@@ -23,12 +63,12 @@ export default async function ReviewPage() {
   if (latestImportRows.length === 0) {
     return (
       <main className="min-h-screen p-8">
-        <div className="mx-auto max-w-4xl space-y-4">
+        <div className="mx-auto max-w-5xl space-y-4">
           <h1 className="text-2xl font-bold">关系复盘</h1>
           <div className="rounded-2xl border p-6">
             <p className="text-base">还没有可用的导入数据。</p>
             <p className="mt-2 text-sm text-gray-600">
-              请先完成 V1.4 导入，再完成 V1.5 的 session 切分。
+              请先完成导入和 session 切分。
             </p>
             <div className="mt-4">
               <Link href="/" className="underline">
@@ -43,7 +83,7 @@ export default async function ReviewPage() {
 
   const latestImport = latestImportRows[0];
 
-  // 2. 找到这次导入对应的 relation
+  // 2. 找对应的 relation
   const relationRows = await db
     .select()
     .from(relations)
@@ -52,7 +92,7 @@ export default async function ReviewPage() {
 
   const relation = relationRows[0] ?? null;
 
-  // 3. 读取这次导入下的全部 sessions
+  // 3. 读取当前导入下的全部 sessions
   const sessionRows = await db
     .select()
     .from(sessions)
@@ -60,15 +100,16 @@ export default async function ReviewPage() {
     .orderBy(desc(sessions.startAt));
 
   const totalMessages = sessionRows.reduce((sum, session) => sum + session.messageCount, 0);
+  const keySessionCount = sessionRows.filter((session) => session.isKeySession).length;
 
   return (
-    <main className="min-h-screen p-8">
-      <div className="mx-auto max-w-5xl space-y-6">
+    <main className="min-h-screen bg-white p-8">
+      <div className="mx-auto max-w-6xl space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">关系复盘</h1>
             <p className="mt-2 text-sm text-gray-600">
-              基于最近一次导入生成的最基础复盘结果
+              基于最近一次导入生成的结构化复盘结果
             </p>
           </div>
 
@@ -77,7 +118,7 @@ export default async function ReviewPage() {
           </Link>
         </div>
 
-        <section className="grid gap-4 md:grid-cols-3">
+        <section className="grid gap-4 md:grid-cols-4">
           <div className="rounded-2xl border p-5">
             <div className="text-sm text-gray-500">关系标题</div>
             <div className="mt-2 text-lg font-semibold">
@@ -94,10 +135,16 @@ export default async function ReviewPage() {
           </div>
 
           <div className="rounded-2xl border p-5">
-            <div className="text-sm text-gray-500">复盘概览</div>
-            <div className="mt-2 text-lg font-semibold">
-              {sessionRows.length} 个聊天阶段 / {totalMessages} 条文本消息
+            <div className="text-sm text-gray-500">聊天阶段数</div>
+            <div className="mt-2 text-lg font-semibold">{sessionRows.length} 个阶段</div>
+            <div className="mt-1 text-xs text-gray-500">
+              共 {totalMessages} 条文本消息
             </div>
+          </div>
+
+          <div className="rounded-2xl border p-5">
+            <div className="text-sm text-gray-500">关键阶段数</div>
+            <div className="mt-2 text-lg font-semibold">{keySessionCount} 个关键阶段</div>
             <div className="mt-1 text-xs text-gray-500">
               状态：{latestImport.status}
             </div>
@@ -106,27 +153,59 @@ export default async function ReviewPage() {
 
         <section className="rounded-2xl border p-5">
           <div className="mb-4">
-            <h2 className="text-xl font-semibold">聊天阶段列表</h2>
+            <h2 className="text-xl font-semibold">聊天阶段结构化复盘</h2>
             <p className="mt-1 text-sm text-gray-600">
-              当前按时间间隔切分，先展示最基础的阶段信息
+              展示每个阶段的摘要、话题标签、整体氛围和关系信号
             </p>
           </div>
 
           {sessionRows.length === 0 ? (
             <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
-              当前导入还没有切分出 session。请先完成 V1.5。
+              当前导入还没有切分出 session。
             </div>
           ) : (
             <div className="space-y-4">
               {sessionRows.map((session, index) => (
-                <div key={session.id} className="rounded-2xl border p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="text-sm text-gray-500">
-                        阶段 {sessionRows.length - index}
+                <div
+                  key={session.id}
+                  className={`rounded-2xl border p-5 ${
+                    session.isKeySession ? 'border-red-200 bg-red-50/30' : ''
+                  }`}
+                >
+                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm text-gray-500">
+                          阶段 {sessionRows.length - index}
+                        </span>
+
+                        {session.isKeySession ? (
+                          <span className="rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+                            关键阶段
+                          </span>
+                        ) : null}
                       </div>
-                      <div className="mt-1 text-lg font-semibold">
+
+                      <h3 className="text-xl font-semibold">
                         {session.title ?? '未命名聊天阶段'}
+                      </h3>
+
+                      <div className="flex flex-wrap gap-2">
+                        <span
+                          className={`rounded-full border px-2 py-1 text-xs font-medium ${getMoodBadgeClass(
+                            session.moodLabel
+                          )}`}
+                        >
+                          氛围：{session.moodLabel ?? '未分析'}
+                        </span>
+
+                        <span
+                          className={`rounded-full border px-2 py-1 text-xs font-medium ${getSignalBadgeClass(
+                            session.signalLabel
+                          )}`}
+                        >
+                          信号：{session.signalLabel ?? '未分析'}
+                        </span>
                       </div>
                     </div>
 
@@ -135,20 +214,45 @@ export default async function ReviewPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 grid gap-2 text-sm text-gray-700 md:grid-cols-2">
-                    <div>
-                      <span className="text-gray-500">开始时间：</span>
-                      {formatDateTime(session.startAt)}
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-xl bg-gray-50 p-4">
+                      <div className="text-sm text-gray-500">开始时间</div>
+                      <div className="mt-1 text-sm font-medium text-gray-800">
+                        {formatDateTime(session.startAt)}
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-gray-500">结束时间：</span>
-                      {formatDateTime(session.endAt)}
+
+                    <div className="rounded-xl bg-gray-50 p-4">
+                      <div className="text-sm text-gray-500">结束时间</div>
+                      <div className="mt-1 text-sm font-medium text-gray-800">
+                        {formatDateTime(session.endAt)}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="mt-3 text-sm text-gray-600">
-                    <span className="text-gray-500">摘要：</span>
-                    {session.summary ?? '当前版本还没有生成摘要'}
+                  <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                    <div className="text-sm text-gray-500">阶段摘要</div>
+                    <div className="mt-2 text-sm leading-6 text-gray-800">
+                      {session.summary ?? '当前阶段还没有生成摘要'}
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="text-sm text-gray-500">话题标签</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {Array.isArray(session.topicTags) && session.topicTags.length > 0 ? (
+                        session.topicTags.map((tag, tagIndex) => (
+                          <span
+                            key={`${session.id}-${tagIndex}`}
+                            className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700"
+                          >
+                            {tag}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm text-gray-500">当前阶段还没有话题标签</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
