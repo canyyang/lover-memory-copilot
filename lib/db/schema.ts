@@ -1,11 +1,11 @@
 import {
-    integer,
-    jsonb,
-    pgTable,
-    text,
-    timestamp,
-    boolean,
-  } from 'drizzle-orm/pg-core';
+  boolean,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+} from 'drizzle-orm/pg-core';
   
   export const users = pgTable('users', {
     id: text('id').primaryKey(),
@@ -59,4 +59,21 @@ import {
     endAt: timestamp('end_at', { withTimezone: true }).notNull(),
     messageCount: integer('message_count').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  });
+
+  export const memoryCards = pgTable('memory_cards', {
+    id: text('id').primaryKey(),
+    relationId: text('relation_id').notNull(),
+  
+    memoryType: text('memory_type').notNull(), // partner_pattern / user_pattern / interaction_pattern / unresolved_issue / positive_signal
+    title: text('title').notNull(),
+    content: text('content').notNull(),
+  
+    evidenceSessionIds: jsonb('evidence_session_ids').$type<string[]>().default([]).notNull(),
+  
+    confidence: text('confidence').notNull(), // high / medium / low
+    status: text('status').default('active').notNull(), // active / hidden
+  
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   });

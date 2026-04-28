@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { imports, relations, sessions } from '@/lib/db/schema';
+import { imports, memoryCards, relations, sessions } from '@/lib/db/schema';
 
 function formatDateTime(value: Date | string) {
   const date = value instanceof Date ? value : new Date(value);
@@ -51,6 +51,53 @@ function getSignalBadgeClass(signalLabel: string | null) {
   }
 }
 
+function getMemoryTypeLabel(memoryType: string) {
+  switch (memoryType) {
+    case 'partner_pattern':
+      return '对方模式';
+    case 'user_pattern':
+      return '用户模式';
+    case 'interaction_pattern':
+      return '互动模式';
+    case 'unresolved_issue':
+      return '未闭环议题';
+    case 'positive_signal':
+      return '积极信号';
+    default:
+      return memoryType;
+  }
+}
+
+function getMemoryTypeBadgeClass(memoryType: string) {
+  switch (memoryType) {
+    case 'partner_pattern':
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'user_pattern':
+      return 'bg-purple-50 text-purple-700 border-purple-200';
+    case 'interaction_pattern':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    case 'unresolved_issue':
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'positive_signal':
+      return 'bg-rose-50 text-rose-700 border-rose-200';
+    default:
+      return 'bg-gray-50 text-gray-700 border-gray-200';
+  }
+}
+
+function getConfidenceLabel(confidence: string) {
+  switch (confidence) {
+    case 'high':
+      return '高';
+    case 'medium':
+      return '中';
+    case 'low':
+      return '低';
+    default:
+      return confidence;
+  }
+}
+
 export default async function ReviewPage() {
   // 1. 找最近一次已解析完成的导入记录
   const latestImportRows = await db
@@ -63,12 +110,12 @@ export default async function ReviewPage() {
   if (latestImportRows.length === 0) {
     return (
       <main className="min-h-screen p-8">
-        <div className="mx-auto max-w-5xl space-y-4">
+        <div className="mx-auto max-w-6xl space-y-4">
           <h1 className="text-2xl font-bold">关系复盘</h1>
           <div className="rounded-2xl border p-6">
             <p className="text-base">还没有可用的导入数据。</p>
             <p className="mt-2 text-sm text-gray-600">
-              请先完成导入和 session 切分。
+              请先完成导入、session 切分和结构化分析。
             </p>
             <div className="mt-4">
               <Link href="/" className="underline">
@@ -83,7 +130,7 @@ export default async function ReviewPage() {
 
   const latestImport = latestImportRows[0];
 
-  // 2. 找对应的 relation
+  // 2. 找对应 relation
   const relationRows = await db
     .select()
     .from(relations)
@@ -92,12 +139,19 @@ export default async function ReviewPage() {
 
   const relation = relationRows[0] ?? null;
 
-  // 3. 读取当前导入下的全部 sessions
+  // 3. 读取 session
   const sessionRows = await db
     .select()
     .from(sessions)
     .where(eq(sessions.importId, latestImport.id))
     .orderBy(desc(sessions.startAt));
+
+  // 4. 读取当前关系下的长期记忆卡片
+  const memoryCardRows = await db
+    .select()
+    .from(memoryCards)
+    .where(eq(memoryCards.relationId, latestImport.relationId))
+    .orderBy(desc(memoryCards.createdAt));
 
   const totalMessages = sessionRows.reduce((sum, session) => sum + session.messageCount, 0);
   const keySessionCount = sessionRows.filter((session) => session.isKeySession).length;
@@ -109,7 +163,7 @@ export default async function ReviewPage() {
           <div>
             <h1 className="text-3xl font-bold">关系复盘</h1>
             <p className="mt-2 text-sm text-gray-600">
-              基于最近一次导入生成的结构化复盘结果
+              基于最近一次导入生成的结构化复盘与长期关系记忆
             </p>
           </div>
 
@@ -143,12 +197,77 @@ export default async function ReviewPage() {
           </div>
 
           <div className="rounded-2xl border p-5">
-            <div className="text-sm text-gray-500">关键阶段数</div>
-            <div className="mt-2 text-lg font-semibold">{keySessionCount} 个关键阶段</div>
+            <div className="text-sm text-gray-500">长期关系记忆</div>
+            <div className="mt-2 text-lg font-semibold">{memoryCardRows.length} 张卡片</div>
             <div className="mt-1 text-xs text-gray-500">
-              状态：{latestImport.status}
+              关键阶段：{keySessionCount} 个
             </div>
           </div>
+        </section>
+
+        <section className="rounded-2xl border p-5">
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold">长期关系记忆</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              基于多个聊天阶段提炼出的长期规律、未闭环议题和积极信号
+            </p>
+          </div>
+
+          {memoryCardRows.length === 0 ? (
+            <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
+              当前关系还没有生成长期关系记忆卡片。请先完成 V3.4。
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {memoryCardRows.map((card) => (
+                <div key={card.id} className="rounded-2xl border p-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`rounded-full border px-2 py-1 text-xs font-medium ${getMemoryTypeBadgeClass(
+                        card.memoryType
+                      )}`}
+                    >
+                      {getMemoryTypeLabel(card.memoryType)}
+                    </span>
+
+                    <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
+                      置信度：{getConfidenceLabel(card.confidence)}
+                    </span>
+
+                    <span className="rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
+                      状态：{card.status}
+                    </span>
+                  </div>
+
+                  <h3 className="mt-3 text-lg font-semibold">{card.title}</h3>
+
+                  <p className="mt-3 text-sm leading-6 text-gray-700">{card.content}</p>
+
+                  <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                    <div className="text-sm text-gray-500">证据阶段</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {Array.isArray(card.evidenceSessionIds) && card.evidenceSessionIds.length > 0 ? (
+                        card.evidenceSessionIds.map((sessionId, index) => (
+                          <span
+                            key={`${card.id}-${index}`}
+                            className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700"
+                          >
+                            {sessionId}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm text-gray-500">暂无证据阶段</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 text-xs text-gray-500">
+                    创建时间：{formatDateTime(card.createdAt)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="rounded-2xl border p-5">
