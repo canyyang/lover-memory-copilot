@@ -12,17 +12,24 @@ export default function HomePage() {
         </div>
 
         <div className="rounded-2xl border p-6">
-          <h2 className="text-xl font-semibold">当前开发进度</h2>
+          <h2 className="text-xl font-semibold">当前可用页面</h2>
           <p className="mt-2 text-sm text-gray-600">
-            你已经完成了 V1.4 导入和 V1.5 session 切分，现在可以查看最基础的关系复盘页。
+            你已经完成了关系复盘、长期关系记忆和关系问答的核心开发。
           </p>
 
-          <div className="mt-4">
+          <div className="mt-4 flex flex-wrap gap-3">
             <Link
               href="/review"
               className="inline-flex rounded-xl border px-4 py-2 text-sm font-medium"
             >
               打开关系复盘页
+            </Link>
+
+            <Link
+              href="/qa"
+              className="inline-flex rounded-xl border px-4 py-2 text-sm font-medium"
+            >
+              打开关系问答页
             </Link>
           </div>
         </div>
