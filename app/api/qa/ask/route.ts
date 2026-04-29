@@ -1,3 +1,6 @@
+import { randomUUID } from 'crypto';
+import { db } from '@/lib/db';
+import { qaRecords } from '@/lib/db/schema';
 import { buildRelationshipQAContext } from '@/lib/qa/retrieve';
 import { answerRelationshipQuestion } from '@/lib/qa/analyze';
 import type { AskQuestionRequestBody } from '@/lib/qa/api-types';
@@ -31,17 +34,35 @@ export async function POST(request: Request) {
       );
     }
 
+    // 1. 构建问答上下文
     const context = await buildRelationshipQAContext({
       relationId,
       question,
     });
 
+    // 2. 调用关系问答
     const answer = await answerRelationshipQuestion(context);
+
+    // 3. 回答成功后，自动写入 qa_records
+    const qaRecordId = randomUUID();
+
+    await db.insert(qaRecords).values({
+      id: qaRecordId,
+      relationId: answer.relationId,
+      question: answer.question,
+      answer: answer.answer,
+      keyPoints: answer.keyPoints,
+      referencedSessionIds: answer.referencedSessionIds,
+      referencedMemoryCardIds: answer.referencedMemoryCardIds,
+    });
 
     return Response.json({
       success: true,
       message: '关系问答成功',
-      data: answer,
+      data: {
+        ...answer,
+        qaRecordId,
+      },
     });
   } catch (error) {
     console.error('关系问答接口失败:', error);

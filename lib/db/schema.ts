@@ -77,3 +77,18 @@ import {
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   });
+
+
+  export const qaRecords = pgTable('qa_records', {
+    id: text('id').primaryKey(),
+    relationId: text('relation_id').notNull(),
+  
+    question: text('question').notNull(),
+    answer: text('answer').notNull(),
+  
+    keyPoints: jsonb('key_points').$type<string[]>().default([]).notNull(),
+    referencedSessionIds: jsonb('referenced_session_ids').$type<string[]>().default([]).notNull(),
+    referencedMemoryCardIds: jsonb('referenced_memory_card_ids').$type<string[]>().default([]).notNull(),
+  
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  });
