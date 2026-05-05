@@ -1,6 +1,8 @@
-import { and, desc, eq, or } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { memoryCards, sessions } from '@/lib/db/schema';
+import { classifyRelationshipQuestionIntent } from './intent';
+import { getRetrievalStrategy } from './retrieval-strategy';
 import type {
   RelationshipQuestionInput,
   RetrievedMemoryEvidence,
@@ -12,8 +14,60 @@ export type BuildQAContextParams = {
   question: string;
 };
 
-const MAX_SESSION_EVIDENCE = 8;
-const MAX_MEMORY_EVIDENCE = 6;
+function normalizeText(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
+function extractQuestionKeywords(question: string): string[] {
+  const raw = question
+    .replace(/[？?！!，,。.\s]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+
+  const manualKeywords = [
+    '最近',
+    '主要',
+    '问题',
+    '卡',
+    '在意',
+    '容易',
+    '关系',
+    '紧张',
+    '回暖',
+    '信号',
+    '积极',
+    '风险',
+    '长期',
+    '注意',
+    '未来',
+    '不安',
+    '安抚',
+    '互动',
+    '回避',
+  ];
+
+  const merged = [...raw, ...manualKeywords.filter((kw) => question.includes(kw))];
+
+  return [...new Set(merged)].filter((kw) => kw.length >= 1);
+}
+
+function countKeywordHits(texts: string[], keywords: string[]): number {
+  let score = 0;
+
+  for (const keyword of keywords) {
+    const normalizedKeyword = normalizeText(keyword);
+    if (!normalizedKeyword) continue;
+
+    for (const text of texts) {
+      if (normalizeText(text).includes(normalizedKeyword)) {
+        score += 1;
+      }
+    }
+  }
+
+  return score;
+}
 
 function normalizeSessionEvidence(
   rows: typeof sessions.$inferSelect[]
@@ -47,22 +101,63 @@ function normalizeMemoryEvidence(
   }));
 }
 
-function dedupeSessions(
-  rows: RetrievedSessionEvidence[]
-): RetrievedSessionEvidence[] {
-  const seen = new Set<string>();
-  const result: RetrievedSessionEvidence[] = [];
+function scoreSession(
+  session: RetrievedSessionEvidence,
+  questionKeywords: string[],
+  preferredSignalLabels: string[],
+  preferredMoodLabels: string[]
+): number {
+  let score = 0;
 
-  for (const row of rows) {
-    if (seen.has(row.sessionId)) {
-      continue;
-    }
-
-    seen.add(row.sessionId);
-    result.push(row);
+  if (session.isKeySession) {
+    score += 4;
   }
 
-  return result;
+  if (session.signalLabel && preferredSignalLabels.includes(session.signalLabel)) {
+    score += 4;
+  }
+
+  if (session.moodLabel && preferredMoodLabels.includes(session.moodLabel)) {
+    score += 3;
+  }
+
+  const keywordHitScore = countKeywordHits(
+    [session.title ?? '', session.summary ?? '', ...(session.topicTags ?? [])],
+    questionKeywords
+  );
+  score += keywordHitScore * 2;
+
+  score += Math.min(session.messageCount, 20) * 0.05;
+
+  return score;
+}
+
+function scoreMemory(
+  memory: RetrievedMemoryEvidence,
+  questionKeywords: string[],
+  preferredMemoryTypes: string[]
+): number {
+  let score = 0;
+
+  if (preferredMemoryTypes.includes(memory.memoryType)) {
+    score += 5;
+  }
+
+  const keywordHitScore = countKeywordHits(
+    [memory.title, memory.content],
+    questionKeywords
+  );
+  score += keywordHitScore * 2;
+
+  if (memory.confidence === 'high') {
+    score += 2;
+  } else if (memory.confidence === 'medium') {
+    score += 1;
+  }
+
+  score += Math.min(memory.evidenceSessionIds.length, 5) * 0.5;
+
+  return score;
 }
 
 export async function buildRelationshipQAContext(
@@ -70,52 +165,64 @@ export async function buildRelationshipQAContext(
 ): Promise<RelationshipQuestionInput> {
   const { relationId, question } = params;
 
-  // 1. 先取最近的关键 session
-  const keySessionRows = await db
-    .select()
-    .from(sessions)
-    .where(
-      and(
-        eq(sessions.relationId, relationId),
-        eq(sessions.isKeySession, true)
-      )
-    )
-    .orderBy(desc(sessions.startAt))
-    .limit(MAX_SESSION_EVIDENCE);
+  const intent = classifyRelationshipQuestionIntent(question);
+  const strategy = getRetrievalStrategy(intent);
+  const questionKeywords = extractQuestionKeywords(question);
 
-  // 2. 再取最近的一般 session 作为补充
-  const recentSessionRows = await db
+  // 1. 读取当前 relation 下所有 sessions
+  const sessionRows = await db
     .select()
     .from(sessions)
     .where(eq(sessions.relationId, relationId))
-    .orderBy(desc(sessions.startAt))
-    .limit(MAX_SESSION_EVIDENCE);
+    .orderBy(desc(sessions.startAt));
 
-  // 合并去重，优先保留关键 session
-  const mergedSessions = dedupeSessions([
-    ...normalizeSessionEvidence(keySessionRows),
-    ...normalizeSessionEvidence(recentSessionRows),
-  ]).slice(0, MAX_SESSION_EVIDENCE);
+  const normalizedSessions = normalizeSessionEvidence(sessionRows);
 
-  // 3. 取 active 的长期关系记忆卡片
+  const rankedSessions = normalizedSessions
+    .map((session, index) => ({
+      session,
+      score:
+        scoreSession(
+          session,
+          questionKeywords,
+          strategy.preferredSignalLabels,
+          strategy.preferredMoodLabels
+        ) +
+        // 让更新近的 session 微微优先
+        Math.max(0, 2 - index * 0.1),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, strategy.maxSessionEvidence)
+    .map((item) => item.session);
+
+  // 2. 读取当前 relation 下 active 的 memory cards
   const memoryRows = await db
     .select()
     .from(memoryCards)
-    .where(
-      and(
-        eq(memoryCards.relationId, relationId),
-        eq(memoryCards.status, 'active')
-      )
-    )
-    .orderBy(desc(memoryCards.createdAt))
-    .limit(MAX_MEMORY_EVIDENCE);
+    .where(eq(memoryCards.relationId, relationId))
+    .orderBy(desc(memoryCards.createdAt));
 
-  const mergedMemories = normalizeMemoryEvidence(memoryRows);
+  const normalizedMemories = normalizeMemoryEvidence(memoryRows).filter(
+    (memory) => memory.confidence !== 'low' || memory.content.length > 0
+  );
 
-  return {
-    relationId,
-    question,
-    sessions: mergedSessions,
-    memories: mergedMemories,
-  };
+  const rankedMemories = normalizedMemories
+    .map((memory, index) => ({
+      memory,
+      score:
+        scoreMemory(memory, questionKeywords, strategy.preferredMemoryTypes) +
+        Math.max(0, 1 - index * 0.05),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, strategy.maxMemoryEvidence)
+    .map((item) => item.memory);
+
+    return {
+      relationId,
+      question,
+      intent,
+      strategy,
+      sessions: rankedSessions,
+      memories: rankedMemories,
+    };
 }

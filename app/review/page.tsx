@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { imports, memoryCards, relations, sessions } from '@/lib/db/schema';
+import { MemorySection } from '@/components/review/memory-section';
 
 function formatDateTime(value: Date | string) {
   const date = value instanceof Date ? value : new Date(value);
@@ -48,53 +49,6 @@ function getSignalBadgeClass(signalLabel: string | null) {
     case '普通互动':
     default:
       return 'bg-gray-50 text-gray-700 border-gray-200';
-  }
-}
-
-function getMemoryTypeLabel(memoryType: string) {
-  switch (memoryType) {
-    case 'partner_pattern':
-      return '对方模式';
-    case 'user_pattern':
-      return '用户模式';
-    case 'interaction_pattern':
-      return '互动模式';
-    case 'unresolved_issue':
-      return '未闭环议题';
-    case 'positive_signal':
-      return '积极信号';
-    default:
-      return memoryType;
-  }
-}
-
-function getMemoryTypeBadgeClass(memoryType: string) {
-  switch (memoryType) {
-    case 'partner_pattern':
-      return 'bg-blue-50 text-blue-700 border-blue-200';
-    case 'user_pattern':
-      return 'bg-purple-50 text-purple-700 border-purple-200';
-    case 'interaction_pattern':
-      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    case 'unresolved_issue':
-      return 'bg-amber-50 text-amber-700 border-amber-200';
-    case 'positive_signal':
-      return 'bg-rose-50 text-rose-700 border-rose-200';
-    default:
-      return 'bg-gray-50 text-gray-700 border-gray-200';
-  }
-}
-
-function getConfidenceLabel(confidence: string) {
-  switch (confidence) {
-    case 'high':
-      return '高';
-    case 'medium':
-      return '中';
-    case 'low':
-      return '低';
-    default:
-      return confidence;
   }
 }
 
@@ -155,7 +109,6 @@ export default async function ReviewPage() {
 
   const totalMessages = sessionRows.reduce((sum, session) => sum + session.messageCount, 0);
   const keySessionCount = sessionRows.filter((session) => session.isKeySession).length;
-
   return (
     <main className="min-h-screen bg-white p-8">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -218,55 +171,28 @@ export default async function ReviewPage() {
               当前关系还没有生成长期关系记忆卡片。请先完成 V3.4。
             </div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              {memoryCardRows.map((card) => (
-                <div key={card.id} className="rounded-2xl border p-5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`rounded-full border px-2 py-1 text-xs font-medium ${getMemoryTypeBadgeClass(
-                        card.memoryType
-                      )}`}
-                    >
-                      {getMemoryTypeLabel(card.memoryType)}
-                    </span>
-
-                    <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
-                      置信度：{getConfidenceLabel(card.confidence)}
-                    </span>
-
-                    <span className="rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
-                      状态：{card.status}
-                    </span>
-                  </div>
-
-                  <h3 className="mt-3 text-lg font-semibold">{card.title}</h3>
-
-                  <p className="mt-3 text-sm leading-6 text-gray-700">{card.content}</p>
-
-                  <div className="mt-4 rounded-xl bg-slate-50 p-4">
-                    <div className="text-sm text-gray-500">证据阶段</div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {Array.isArray(card.evidenceSessionIds) && card.evidenceSessionIds.length > 0 ? (
-                        card.evidenceSessionIds.map((sessionId, index) => (
-                          <span
-                            key={`${card.id}-${index}`}
-                            className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700"
-                          >
-                            {sessionId}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-sm text-gray-500">暂无证据阶段</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 text-xs text-gray-500">
-                    创建时间：{formatDateTime(card.createdAt)}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <MemorySection
+              memoryCards={memoryCardRows.map((card) => ({
+                id: card.id,
+                memoryType: card.memoryType,
+                title: card.title,
+                content: card.content,
+                confidence: card.confidence,
+                status: card.status,
+                evidenceSessionIds: Array.isArray(card.evidenceSessionIds)
+                  ? card.evidenceSessionIds
+                  : [],
+                createdAt: new Date(card.createdAt).toISOString(),
+              }))}
+              sessionMapData={sessionRows.map((session) => ({
+                id: session.id,
+                title: session.title,
+                summary: session.summary,
+                startAt: new Date(session.startAt).toISOString(),
+                endAt: new Date(session.endAt).toISOString(),
+                messageCount: session.messageCount,
+              }))}
+            />
           )}
         </section>
 
@@ -286,10 +212,10 @@ export default async function ReviewPage() {
             <div className="space-y-4">
               {sessionRows.map((session, index) => (
                 <div
+                  id={`session-${session.id}`}
                   key={session.id}
-                  className={`rounded-2xl border p-5 ${
-                    session.isKeySession ? 'border-red-200 bg-red-50/30' : ''
-                  }`}
+                  className={`rounded-2xl border p-5 ${session.isKeySession ? 'border-red-200 bg-red-50/30' : ''
+                    }`}
                 >
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div className="space-y-2">
