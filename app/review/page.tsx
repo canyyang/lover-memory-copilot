@@ -3,6 +3,8 @@ import { desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { imports, memoryCards, relations, sessions } from '@/lib/db/schema';
 import { MemorySection } from '@/components/review/memory-section';
+import { generateAiOverview } from '@/lib/review/overview-ai';
+import { KeySessionSection } from '@/components/review/key-session-section';
 
 function formatDateTime(value: Date | string) {
   const date = value instanceof Date ? value : new Date(value);
@@ -53,7 +55,6 @@ function getSignalBadgeClass(signalLabel: string | null) {
 }
 
 export default async function ReviewPage() {
-  // 1. 找最近一次已解析完成的导入记录
   const latestImportRows = await db
     .select()
     .from(imports)
@@ -63,13 +64,13 @@ export default async function ReviewPage() {
 
   if (latestImportRows.length === 0) {
     return (
-      <main className="min-h-screen p-8">
+      <main className="min-h-screen bg-white p-8">
         <div className="mx-auto max-w-6xl space-y-4">
           <h1 className="text-2xl font-bold">关系复盘</h1>
           <div className="rounded-2xl border p-6">
-            <p className="text-base">还没有可用的导入数据。</p>
+            <p className="text-base">当前还没有可用的关系复盘数据。</p>
             <p className="mt-2 text-sm text-gray-600">
-              请先完成导入、session 切分和结构化分析。
+              请先完成聊天导入、session 切分和结构化分析。
             </p>
             <div className="mt-4">
               <Link href="/" className="underline">
@@ -84,7 +85,6 @@ export default async function ReviewPage() {
 
   const latestImport = latestImportRows[0];
 
-  // 2. 找对应 relation
   const relationRows = await db
     .select()
     .from(relations)
@@ -93,14 +93,12 @@ export default async function ReviewPage() {
 
   const relation = relationRows[0] ?? null;
 
-  // 3. 读取 session
   const sessionRows = await db
     .select()
     .from(sessions)
     .where(eq(sessions.importId, latestImport.id))
     .orderBy(desc(sessions.startAt));
 
-  // 4. 读取当前关系下的长期记忆卡片
   const memoryCardRows = await db
     .select()
     .from(memoryCards)
@@ -108,32 +106,70 @@ export default async function ReviewPage() {
     .orderBy(desc(memoryCards.createdAt));
 
   const totalMessages = sessionRows.reduce((sum, session) => sum + session.messageCount, 0);
-  const keySessionCount = sessionRows.filter((session) => session.isKeySession).length;
+  const keySessionRows = sessionRows.filter((session) => session.isKeySession);
+  const keySessionCount = keySessionRows.length;
+  const activeMemoryCount = memoryCardRows.filter((card) => card.status === 'active').length;
+
+  const overviewText = await generateAiOverview({
+    keySessions: keySessionRows.map((s) => ({
+      title: s.title,
+      summary: s.summary,
+      moodLabel: s.moodLabel,
+      signalLabel: s.signalLabel,
+    })),
+    memoryCards: memoryCardRows.map((m) => ({
+      memoryType: m.memoryType,
+      title: m.title,
+      content: m.content,
+      confidence: m.confidence,
+      status: m.status,
+    })),
+    totalSessions: sessionRows.length,
+    totalMessages,
+  });
+
   return (
     <main className="min-h-screen bg-white p-8">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="mx-auto max-w-6xl space-y-8">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <h1 className="text-3xl font-bold">关系复盘</h1>
             <p className="mt-2 text-sm text-gray-600">
-              基于最近一次导入生成的结构化复盘与长期关系记忆
+              基于最近一次导入生成的结构化复盘、长期关系记忆与关键阶段分析
             </p>
           </div>
 
-          <Link href="/" className="text-sm underline">
-            返回首页
-          </Link>
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <a href="#overview" className="underline">
+              总览
+            </a>
+            <a href="#key-sessions" className="underline">
+              关键阶段
+            </a>
+            <a href="#memories" className="underline">
+              长期记忆
+            </a>
+            <a href="#all-sessions" className="underline">
+              全部阶段
+            </a>
+            <Link href="/qa" className="underline">
+              去关系问答
+            </Link>
+            <Link href="/" className="underline">
+              返回首页
+            </Link>
+          </div>
         </div>
 
-        <section className="grid gap-4 md:grid-cols-4">
-          <div className="rounded-2xl border p-5">
+        <section id="overview" className="grid gap-4 md:grid-cols-4">
+          <div className="rounded-2xl border p-5 shadow-sm">
             <div className="text-sm text-gray-500">关系标题</div>
             <div className="mt-2 text-lg font-semibold">
               {relation?.title ?? '未命名关系'}
             </div>
           </div>
 
-          <div className="rounded-2xl border p-5">
+          <div className="rounded-2xl border p-5 shadow-sm">
             <div className="text-sm text-gray-500">最近导入文件</div>
             <div className="mt-2 text-lg font-semibold">{latestImport.fileName}</div>
             <div className="mt-1 text-xs text-gray-500">
@@ -141,24 +177,70 @@ export default async function ReviewPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border p-5">
-            <div className="text-sm text-gray-500">聊天阶段数</div>
-            <div className="mt-2 text-lg font-semibold">{sessionRows.length} 个阶段</div>
-            <div className="mt-1 text-xs text-gray-500">
-              共 {totalMessages} 条文本消息
+          <div className="rounded-2xl border p-5 shadow-sm">
+            <div className="text-sm text-gray-500">聊天阶段 / 消息</div>
+            <div className="mt-2 text-lg font-semibold">
+              {sessionRows.length} 个阶段 / {totalMessages} 条消息
             </div>
-          </div>
-
-          <div className="rounded-2xl border p-5">
-            <div className="text-sm text-gray-500">长期关系记忆</div>
-            <div className="mt-2 text-lg font-semibold">{memoryCardRows.length} 张卡片</div>
             <div className="mt-1 text-xs text-gray-500">
               关键阶段：{keySessionCount} 个
             </div>
           </div>
+
+          <div className="rounded-2xl border p-5 shadow-sm">
+            <div className="text-sm text-gray-500">长期关系记忆</div>
+            <div className="mt-2 text-lg font-semibold">
+              {memoryCardRows.length} 张卡片
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              active：{activeMemoryCount} / hidden：{memoryCardRows.length - activeMemoryCount}
+            </div>
+          </div>
         </section>
 
-        <section className="rounded-2xl border p-5">
+        <section className="rounded-2xl border p-6 shadow-sm">
+          <div className="mb-3">
+            <h2 className="text-xl font-semibold">关系总览摘要</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              基于关键阶段和长期关系记忆自动生成的高层总结
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-slate-50 p-4 text-sm leading-7 text-gray-800">
+            {overviewText || '当前无法生成总览摘要'}
+          </div>
+        </section>
+
+        <section id="key-sessions" className="rounded-2xl border p-6 shadow-sm">
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold">关键阶段</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              优先展示被识别为关键阶段的聊天片段，并按重要性排序，便于先看最值得关注的部分
+            </p>
+          </div>
+
+          {keySessionRows.length === 0 ? (
+            <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
+              当前还没有关键阶段。
+            </div>
+          ) : (
+            <KeySessionSection
+              sessions={keySessionRows.map((session) => ({
+                id: session.id,
+                title: session.title,
+                summary: session.summary,
+                moodLabel: session.moodLabel,
+                signalLabel: session.signalLabel,
+                startAt: new Date(session.startAt).toISOString(),
+                endAt: new Date(session.endAt).toISOString(),
+                messageCount: session.messageCount,
+                topicTags: Array.isArray(session.topicTags) ? session.topicTags : [],
+              }))}
+            />
+          )}
+        </section>
+
+        <section id="memories" className="rounded-2xl border p-6 shadow-sm">
           <div className="mb-4">
             <h2 className="text-xl font-semibold">长期关系记忆</h2>
             <p className="mt-1 text-sm text-gray-600">
@@ -196,11 +278,11 @@ export default async function ReviewPage() {
           )}
         </section>
 
-        <section className="rounded-2xl border p-5">
+        <section id="all-sessions" className="rounded-2xl border p-6 shadow-sm">
           <div className="mb-4">
-            <h2 className="text-xl font-semibold">聊天阶段结构化复盘</h2>
+            <h2 className="text-xl font-semibold">完整聊天阶段列表</h2>
             <p className="mt-1 text-sm text-gray-600">
-              展示每个阶段的摘要、话题标签、整体氛围和关系信号
+              完整展示每个阶段的摘要、话题标签、整体氛围和关系信号
             </p>
           </div>
 
@@ -214,7 +296,7 @@ export default async function ReviewPage() {
                 <div
                   id={`session-${session.id}`}
                   key={session.id}
-                  className={`rounded-2xl border p-5 ${session.isKeySession ? 'border-red-200 bg-red-50/30' : ''
+                  className={`scroll-mt-24 rounded-2xl border p-5 ${session.isKeySession ? 'border-red-200 bg-red-50/30' : ''
                     }`}
                 >
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">

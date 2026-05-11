@@ -1,10 +1,9 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import { MemoryFilterBar } from './memory-filter-bar';
 import { MemoryCardActions } from './memory-card-actions';
 import { MemoryCardEditor } from './memory-card-editor';
-
-import { useMemo, useState } from 'react';
 
 type MemoryTypeFilter =
   | 'all'
@@ -54,6 +53,46 @@ function groupLabel(type: string) {
     default:
       return type;
   }
+}
+
+function groupDescription(type: string) {
+  switch (type) {
+    case 'partner_pattern':
+      return '描述对方在关系中的稳定情绪模式、在意点和行为倾向。';
+    case 'user_pattern':
+      return '描述用户在关系中的高风险模式、习惯性反应和影响。';
+    case 'interaction_pattern':
+      return '描述双方互动中反复出现的交流方式和关系节奏。';
+    case 'unresolved_issue':
+      return '记录长期没有真正闭环、容易反复出现的议题。';
+    case 'positive_signal':
+      return '记录关系回暖、互相关心和积极互动的长期信号。';
+    default:
+      return '';
+  }
+}
+
+function sortCards(cards: MemoryCardItem[]) {
+  const confidenceScore = (value: string) => {
+    if (value === 'high') return 3;
+    if (value === 'medium') return 2;
+    return 1;
+  };
+
+  const statusScore = (value: string) => {
+    if (value === 'active') return 2;
+    return 1;
+  };
+
+  return [...cards].sort((a, b) => {
+    const statusDiff = statusScore(b.status) - statusScore(a.status);
+    if (statusDiff !== 0) return statusDiff;
+
+    const confidenceDiff = confidenceScore(b.confidence) - confidenceScore(a.confidence);
+    if (confidenceDiff !== 0) return confidenceDiff;
+
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
 }
 
 function formatDateTime(value: string) {
@@ -139,12 +178,27 @@ export function MemorySection({
     return base;
   }, [memoryCards]);
 
-  const filteredCards = useMemo(() => {
-    if (filter === 'all') {
-      return memoryCards;
-    }
+  const activeCount = useMemo(
+    () => memoryCards.filter((card) => card.status === 'active').length,
+    [memoryCards]
+  );
 
-    return memoryCards.filter((card) => card.memoryType === filter);
+  const hiddenCount = useMemo(
+    () => memoryCards.filter((card) => card.status === 'hidden').length,
+    [memoryCards]
+  );
+
+  const highConfidenceCount = useMemo(
+    () => memoryCards.filter((card) => card.confidence === 'high').length,
+    [memoryCards]
+  );
+
+  const filteredCards = useMemo(() => {
+    const base = filter === 'all'
+      ? memoryCards
+      : memoryCards.filter((card) => card.memoryType === filter);
+
+    return sortCards(base);
   }, [filter, memoryCards]);
 
   const groupedCards = useMemo(() => {
@@ -153,6 +207,7 @@ export function MemorySection({
         {
           type: filter,
           label: groupLabel(filter),
+          description: groupDescription(filter),
           items: filteredCards,
         },
       ];
@@ -170,13 +225,34 @@ export function MemorySection({
       .map((type) => ({
         type,
         label: groupLabel(type),
-        items: filteredCards.filter((card) => card.memoryType === type),
+        description: groupDescription(type),
+        items: sortCards(filteredCards.filter((card) => card.memoryType === type)),
       }))
       .filter((group) => group.items.length > 0);
   }, [filter, filteredCards]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border p-4">
+          <div className="text-sm text-gray-500">记忆卡片总数</div>
+          <div className="mt-2 text-lg font-semibold">{memoryCards.length} 张</div>
+        </div>
+
+        <div className="rounded-2xl border p-4">
+          <div className="text-sm text-gray-500">状态分布</div>
+          <div className="mt-2 text-sm text-gray-800">
+            active：<span className="font-medium">{activeCount}</span> / hidden：
+            <span className="font-medium"> {hiddenCount}</span>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border p-4">
+          <div className="text-sm text-gray-500">高置信度卡片</div>
+          <div className="mt-2 text-lg font-semibold">{highConfidenceCount} 张</div>
+        </div>
+      </div>
+
       <MemoryFilterBar value={filter} onChange={setFilter} counts={counts} />
 
       {filteredCards.length === 0 ? (
@@ -186,16 +262,22 @@ export function MemorySection({
       ) : (
         groupedCards.map((group) => (
           <div key={group.type} className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">{group.label}</h3>
-              <div className="text-sm text-gray-500">{group.items.length} 张卡片</div>
+            <div className="rounded-2xl border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">{group.label}</h3>
+                  <p className="mt-1 text-sm text-gray-600">{group.description}</p>
+                </div>
+
+                <div className="text-sm text-gray-500">{group.items.length} 张卡片</div>
+              </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               {group.items.map((card) => (
                 <div
                   key={card.id}
-                  className={`rounded-2xl border p-5 ${
+                  className={`rounded-2xl border p-5 shadow-sm ${
                     card.status === 'hidden' ? 'border-dashed opacity-70' : ''
                   }`}
                 >
@@ -243,7 +325,10 @@ export function MemorySection({
                     </div>
                   </div>
 
-                  <p className="mt-4 text-sm leading-6 text-gray-700">{card.content}</p>
+                  <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                    <div className="text-sm text-gray-500">记忆内容</div>
+                    <div className="mt-2 text-sm leading-7 text-gray-800">{card.content}</div>
+                  </div>
 
                   <div className="mt-4 rounded-xl bg-slate-50 p-4">
                     <div className="text-sm text-gray-500">证据阶段</div>
@@ -305,8 +390,9 @@ export function MemorySection({
                     )}
                   </div>
 
-                  <div className="mt-3 text-xs text-gray-500">
-                    创建时间：{formatDateTime(card.createdAt)}
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-gray-500">
+                    <div>创建时间：{formatDateTime(card.createdAt)}</div>
+                    <div>证据阶段数：{card.evidenceSessionIds.length}</div>
                   </div>
                 </div>
               ))}

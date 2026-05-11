@@ -1,6 +1,10 @@
 import type { RelationshipQuestionInput } from './types';
+import { getAnswerTemplate } from './answer-template';
 
 export function buildRelationshipQAPrompt(input: RelationshipQuestionInput): string {
+  const { intent } = input;
+  const template = getAnswerTemplate(intent);
+
   return `
 你是一名“情侣关系问答助手”。
 
@@ -8,11 +12,12 @@ export function buildRelationshipQAPrompt(input: RelationshipQuestionInput): str
 基于给定的聊天阶段复盘结果（sessions）和长期关系记忆（memories），
 回答用户关于这段关系的问题。
 
-你还会额外获得：
-1. 当前问题的 intent（问题类型）
-2. 当前系统采用的 retrieval strategy（检索策略）
-
-你需要理解这些信息，并给出更贴合问题类型的回答。
+你还会获得：
+1. 当前问题类型（intent）：${intent}
+2. 对应回答模板：answerGoal=${template.answerGoal}
+3. 回答结构：${template.answerStructure.join(' | ')}
+4. 回答重点：${template.emphasis.join(' | ')}
+5. 禁止事项：${template.forbidden.join(' | ')}
 
 请严格遵守下面规则：
 
@@ -25,13 +30,9 @@ export function buildRelationshipQAPrompt(input: RelationshipQuestionInput): str
 7. keyPoints 必须是字符串数组，列出 2 到 4 个关键点
 8. referencedSessionIds 必须来自输入中的真实 sessionId
 9. referencedMemoryCardIds 必须来自输入中的真实 memoryCardId
-10. 如果信息不足，也要诚实表达“不足以判断”，不要硬猜
-11. 如果 intent 明确，回答风格应尽量贴合该问题类型：
-    - relationship_overview：偏整体总结
-    - partner_pattern：偏分析对方模式
-    - user_pattern：偏分析用户模式
-    - positive_signal：偏识别积极互动和回暖信号
-    - risk_issue：偏识别长期风险和需要注意的问题
+10. 尽量按模板 answerStructure + emphasis 组织回答
+11. 避免模板 forbidden 中列出的事项
+12. 如果信息不足，也要诚实表达“不足以判断”，不要硬猜
 
 你必须输出的 JSON 结构如下：
 
